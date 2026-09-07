@@ -48,8 +48,8 @@ export function HistoryDetail() {
   const compliance = fullData.compliance || null;
   const rules = Array.isArray(compliance?.results) ? compliance.results : [];
   const imageUrl = fullData.processed_image
-    ? `http://127.0.0.1:8000/${fullData.processed_image}`
-    : scan.previewUrl || "https://placehold.co/600x400?text=Product+Package";
+  ? `${API_BASE_URL}/${fullData.processed_image}`
+  : scan.previewUrl || "https://placehold.co/600x400?text=Product+Package";
 
   const handlePrint = () => {
     window.print();
