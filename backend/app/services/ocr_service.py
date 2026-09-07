@@ -1,105 +1,93 @@
 import os
-
-# ---------------------------------------------------------
-# PaddleOCR / PaddlePaddle memory configuration
-# ---------------------------------------------------------
-
-os.environ["PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"] = "0"
-os.environ["FLAGS_use_mkldnn"] = "0"
-os.environ["FLAGS_enable_pir_api"] = "0"
-
-from paddleocr import PaddleOCR
+import requests
 
 
 class OCRService:
+    """
+    Remote PaddleOCR client.
+
+    PaddleOCR runs in a separate Render service.
+    """
 
     def __init__(self):
-        print("Initializing PaddleOCR...")
 
-        self.ocr = PaddleOCR(
-            lang="en",
-            device="cpu",
-            enable_mkldnn=False,
-
-            # -------------------------------------------------
-            # MEMORY OPTIMIZATION
-            #
-            # Keep the core OCR pipeline:
-            #   Text Detection
-            #   Text Recognition
-            #
-            # Disable auxiliary models that are not required
-            # for our packaged-product OCR workflow.
-            # -------------------------------------------------
-
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
+        self.ocr_url = os.getenv(
+            "PADDLEOCR_SERVICE_URL"
         )
 
-        print("PaddleOCR initialized successfully.")
+        if not self.ocr_url:
+            raise RuntimeError(
+                "PADDLEOCR_SERVICE_URL is not configured."
+            )
+
+        print("=" * 60)
+        print("Remote PaddleOCR Service")
+        print(f"URL: {self.ocr_url}")
+        print("=" * 60)
 
     def extract_text(self, image_path: str):
 
-        result = self.ocr.predict(
-            image_path,
+        if not os.path.exists(image_path):
+            raise FileNotFoundError(
+                f"OCR image does not exist: {image_path}"
+            )
 
-            # Explicitly keep the same configuration during
-            # inference.
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
-        )
+        print("Sending image to PaddleOCR service...")
 
-        ocr_results = []
+        try:
 
-        for res in result:
+            with open(image_path, "rb") as image_file:
 
-            data = res.json
+                response = requests.post(
+                    self.ocr_url,
 
-            if isinstance(data, dict):
-                data = data.get("res", data)
+                    files={
+                        "file": (
+                            os.path.basename(image_path),
+                            image_file,
+                            "image/jpeg",
+                        )
+                    },
 
-            texts = data.get("rec_texts", [])
-            scores = data.get("rec_scores", [])
-            boxes = data.get("rec_boxes", [])
-
-            for i, text in enumerate(texts):
-
-                confidence = None
-
-                if i < len(scores):
-                    confidence = float(scores[i])
-
-                bbox = None
-
-                if i < len(boxes):
-
-                    current_box = boxes[i]
-
-                    if hasattr(current_box, "tolist"):
-                        bbox = current_box.tolist()
-                    else:
-                        bbox = current_box
-
-                ocr_results.append(
-                    {
-                        "text": text,
-                        "confidence": confidence,
-                        "bbox": bbox,
-                    }
+                    timeout=180,
                 )
 
-        return ocr_results
+            response.raise_for_status()
+
+            data = response.json()
+
+            if not data.get("success", False):
+
+                raise RuntimeError(
+                    "PaddleOCR service returned unsuccessful response."
+                )
+
+            ocr_results = data.get(
+                "ocr_results",
+                []
+            )
+
+            print(
+                f"PaddleOCR returned "
+                f"{len(ocr_results)} text blocks."
+            )
+
+            return ocr_results
+
+        except requests.RequestException as exception:
+
+            print(
+                "PaddleOCR service error:",
+                str(exception)
+            )
+
+            raise RuntimeError(
+                f"PaddleOCR service unavailable: {exception}"
+            )
 
 
-# ---------------------------------------------------------
-# SINGLE OCR INSTANCE
-# ---------------------------------------------------------
-#
-# Keep exactly one OCR instance per backend process.
-#
-# Do NOT create PaddleOCR anywhere else.
-# ---------------------------------------------------------
+# ============================================================
+# SINGLETON
+# ============================================================
 
 ocr_service = OCRService()
