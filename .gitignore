@@ -70,3 +70,4 @@ __pycache__/
 .env
 
 .git-backup/
+.env

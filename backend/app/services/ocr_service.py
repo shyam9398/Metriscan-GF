@@ -1,6 +1,9 @@
 import os
 
-# Disable problematic CPU optimizations on Windows
+# ---------------------------------------------------------
+# PaddleOCR / PaddlePaddle memory configuration
+# ---------------------------------------------------------
+
 os.environ["PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"] = "0"
 os.environ["FLAGS_use_mkldnn"] = "0"
 os.environ["FLAGS_enable_pir_api"] = "0"
@@ -11,16 +14,42 @@ from paddleocr import PaddleOCR
 class OCRService:
 
     def __init__(self):
+        print("Initializing PaddleOCR...")
 
         self.ocr = PaddleOCR(
             lang="en",
             device="cpu",
             enable_mkldnn=False,
+
+            # -------------------------------------------------
+            # MEMORY OPTIMIZATION
+            #
+            # Keep the core OCR pipeline:
+            #   Text Detection
+            #   Text Recognition
+            #
+            # Disable auxiliary models that are not required
+            # for our packaged-product OCR workflow.
+            # -------------------------------------------------
+
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
         )
+
+        print("PaddleOCR initialized successfully.")
 
     def extract_text(self, image_path: str):
 
-        result = self.ocr.predict(image_path)
+        result = self.ocr.predict(
+            image_path,
+
+            # Explicitly keep the same configuration during
+            # inference.
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+        )
 
         ocr_results = []
 
@@ -37,18 +66,10 @@ class OCRService:
 
             for i, text in enumerate(texts):
 
-                # -----------------------------------------
-                # Confidence
-                # -----------------------------------------
-
                 confidence = None
 
                 if i < len(scores):
                     confidence = float(scores[i])
-
-                # -----------------------------------------
-                # Bounding box
-                # -----------------------------------------
 
                 bbox = None
 
@@ -56,18 +77,10 @@ class OCRService:
 
                     current_box = boxes[i]
 
-                    # PaddleOCR may return either:
-                    # - Python list
-                    # - NumPy array
-
                     if hasattr(current_box, "tolist"):
                         bbox = current_box.tolist()
                     else:
                         bbox = current_box
-
-                # -----------------------------------------
-                # Store OCR result
-                # -----------------------------------------
 
                 ocr_results.append(
                     {
@@ -79,5 +92,14 @@ class OCRService:
 
         return ocr_results
 
+
+# ---------------------------------------------------------
+# SINGLE OCR INSTANCE
+# ---------------------------------------------------------
+#
+# Keep exactly one OCR instance per backend process.
+#
+# Do NOT create PaddleOCR anywhere else.
+# ---------------------------------------------------------
 
 ocr_service = OCRService()
